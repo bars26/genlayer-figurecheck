@@ -28,7 +28,7 @@ S51_RKO, S51_HT29 = "195,198,348,288", "372,198,525,288"
 WELL_WT_GLN, WELL_KI_GLN = "66,67,102,103", "66,123,102,159"
 CAPTION = "Figure 7—figure supplement 1. Western blots of RKO and HT29 cells under glutamine deprivation."
 FIRST = r"Decide whether\s+these are literally the same picture"
-SECOND = r"Someone contested it"
+SECOND = r"It was contested"
 NOTICE = r"correction, erratum or retraction notice"
 
 
@@ -85,14 +85,21 @@ def _fund(direct_vm, direct_deploy, sponsor, value=2 * GEN, reward=REWARD, stake
     return contract, fid
 
 
+def _deposit(direct_vm, contract, who, amount=STAKE):
+    direct_vm.sender, direct_vm.value = who, amount
+    contract.deposit()
+    direct_vm.value = 0
+
+
 def _file(direct_vm, contract, who, a=GCN2_RKO, b=GCN2_HT29, figure=FIG7, answer="DUPLICATED", stake=STAKE, pmcid=PMC, **paper):
+    """Deposit `stake` for `who`, then file (the fund's stake is taken from that credit)."""
     direct_vm.clear_mocks()
     _paper(direct_vm, pmcid=pmcid, **paper)
     _first(direct_vm, answer)
-    direct_vm.sender, direct_vm.value = who, stake
-    result = contract.file_finding("fund_0", pmcid, figure, a, b, "GCN2 (T899), RKO", "GCN2 (T899), HT29")
-    direct_vm.value = 0
-    return result
+    if stake:
+        _deposit(direct_vm, contract, who, stake)
+    direct_vm.sender = who
+    return contract.file_finding("fund_0", pmcid, figure, a, b, "GCN2 (T899), RKO", "GCN2 (T899), HT29")
 
 
 def _expire(contract, fid):
@@ -145,6 +152,24 @@ def test_captions_come_from_the_innermost_figure_and_labels_from_their_number(di
 def test_code_decides_from_the_shape_score_and_the_models_answer(direct_vm, direct_deploy, direct_alice, shape, answer, state):
     direct_vm.sender = direct_alice
     assert _module(direct_deploy(CONTRACT_PATH)).verdict({"shape": shape, "answer": answer}) == state
+
+
+def test_validators_settle_a_wavering_model_on_the_cautious_answer(direct_vm, direct_deploy, direct_alice):
+    direct_vm.sender = direct_alice
+    m = _module(direct_deploy(CONTRACT_PATH))
+    code = {"state": "ok", "md5": "x", "shape": 0.92}
+
+    def agrees(leader, mine, cautious=("UNCLEAR",)):
+        return m._validator(lambda: json.dumps(mine), cautious)(m.gl.vm.Return(json.dumps(leader)))
+
+    assert agrees({**code, "answer": "DUPLICATED"}, {**code, "answer": "DUPLICATED"})
+    assert not agrees({**code, "answer": "DUPLICATED"}, {**code, "answer": "UNCLEAR"})  # a match needs every validator
+    assert agrees({**code, "answer": "UNCLEAR"}, {**code, "answer": "DUPLICATED"})  # the cautious answer is accepted
+    assert not agrees({**code, "answer": "UNCLEAR"}, {**code, "shape": 0.5, "answer": "UNCLEAR"})  # code must match
+    assert not agrees({**code, "answer": "DISTINCT"}, {**code, "answer": "UNCLEAR"})  # costing a stake needs agreement
+    assert agrees({"state": "none", "answer": "NONE", "checked": 2}, {"state": "ok", "answer": "YES", "notice": "PMC1"}, ("NONE",))
+    assert not agrees({"state": "ok", "answer": "YES", "notice": "PMC1"}, {"state": "none", "answer": "NONE"}, ("NONE",))
+    assert not agrees({"state": "error"}, {"state": "ok"}) and agrees({"state": "error"}, {"state": "error"})
 
 
 # --- funds -----------------------------------------------------------------------------------------------------------
@@ -215,7 +240,7 @@ def test_the_models_answer_decides_lookalike_panels(direct_vm, direct_deploy, di
 
 
 @pytest.mark.parametrize("kwargs, reason", [
-    ({"stake": STAKE // 2}, "send exactly the fund's stake"),
+    ({"stake": STAKE // 2}, "deposit the stake first"),
     ({"pmcid": "12345"}, "pmcid like PMC1234567"),
     ({"figure": "figure.png"}, "the figure's JPEG file name"),
     ({"a": "195,112,348,170"}, "of the same size"),
@@ -226,11 +251,11 @@ def test_the_models_answer_decides_lookalike_panels(direct_vm, direct_deploy, di
     ({"served": {FIG7: (FIX / FIG5).read_bytes()}}, "md5 mismatch"),
     ({"a": "400,600,450,619", "b": "530,600,580,619"}, "outside"),
 ])
-def test_bad_findings_are_refused_and_the_stake_credited_back(direct_vm, direct_deploy, direct_alice, direct_bob, kwargs, reason):
+def test_bad_findings_are_refused_and_the_deposit_stays_credited(direct_vm, direct_deploy, direct_alice, direct_bob, kwargs, reason):
     contract, fid = _fund(direct_vm, direct_deploy, direct_alice)
     stake = kwargs.get("stake", STAKE)
-    result = _file(direct_vm, contract, direct_bob, **kwargs)
-    assert result.startswith("REFUNDED: ") and reason in result, result
+    with direct_vm.expect_revert(reason):
+        _file(direct_vm, contract, direct_bob, **kwargs)
     assert int(contract.finding_count) == 0 and _owed(contract, direct_bob) == stake
 
 
@@ -245,9 +270,11 @@ def test_a_panel_at_the_edge_of_the_figure_is_compared_within_the_figure(direct_
 def test_the_same_panels_once_per_fund_and_a_cap_per_reporter(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract, fid = _fund(direct_vm, direct_deploy, direct_alice, cap=2)
     _file(direct_vm, contract, direct_bob)
-    assert "finding_0 already reports these panels" in _file(direct_vm, contract, direct_bob, a=GCN2_HT29, b=GCN2_RKO)
+    with direct_vm.expect_revert("finding_0 already reports these panels"):
+        _file(direct_vm, contract, direct_bob, a=GCN2_HT29, b=GCN2_RKO)
     _file(direct_vm, contract, direct_bob, a=S51_RKO, b=S51_HT29, answer="UNCLEAR")
-    assert "at most 2 findings per reporter" in _file(direct_vm, contract, direct_bob, a=WELL_WT_GLN, b=WELL_KI_GLN, figure=FIG5)
+    with direct_vm.expect_revert("at most 2 findings per reporter"):
+        _file(direct_vm, contract, direct_bob, a=WELL_WT_GLN, b=WELL_KI_GLN, figure=FIG5)
 
 
 # --- settling, contests and notices -------------------------------------------------------------------------------
@@ -281,9 +308,8 @@ def test_a_contest_gets_a_second_look_with_the_caption(direct_vm, direct_deploy,
     contract, fid = _fund(direct_vm, direct_deploy, direct_alice)
     _file(direct_vm, contract, direct_bob)
     direct_vm.mock_llm(SECOND, llm_json({"answer": answer}))
-    direct_vm.sender, direct_vm.value = direct_charlie, STAKE
+    _deposit(direct_vm, contract, direct_charlie)
     assert contract.contest("finding_0", "The caption says both lines share one GCN2 blot.") == state
-    direct_vm.value = 0
     d = contract.get_finding("finding_0")
     assert (d.contest_answer, d.contester.as_hex) == (answer, to_hex(direct_charlie))
     assert (_owed(contract, direct_bob), _owed(contract, direct_charlie)) == (reporter, contester)
@@ -295,16 +321,18 @@ def test_a_contest_gets_a_second_look_with_the_caption(direct_vm, direct_deploy,
 def test_contests_need_the_stake_another_wallet_and_an_open_window(direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie):
     contract, fid = _fund(direct_vm, direct_deploy, direct_alice)
     _file(direct_vm, contract, direct_bob)
-    direct_vm.sender, direct_vm.value = direct_bob, STAKE
-    assert "cannot contest their own" in contract.contest("finding_0", "I changed my mind about it.")
-    direct_vm.sender, direct_vm.value = direct_charlie, STAKE // 2
-    assert "send exactly the finding's stake" in contract.contest("finding_0", "Same loading control, see caption.")
-    direct_vm.value = STAKE
-    assert "explanation must be 10 to 600" in contract.contest("finding_0", "no")
+    direct_vm.sender = direct_bob
+    with direct_vm.expect_revert("cannot contest their own"):
+        contract.contest("finding_0", "I changed my mind about it.")
+    _deposit(direct_vm, contract, direct_charlie, STAKE // 2)
+    with direct_vm.expect_revert("deposit the stake first"):
+        contract.contest("finding_0", "Same loading control, see caption.")
+    with direct_vm.expect_revert("explanation must be 10 to 600"):
+        contract.contest("finding_0", "no")
     _expire(contract, "finding_0")
-    assert "not an open match" in contract.contest("finding_0", "Same loading control, see caption.")
-    direct_vm.value = 0
-    assert _owed(contract, direct_charlie) == STAKE + STAKE // 2 + STAKE and contract.get_finding("finding_0").state == "match"
+    with direct_vm.expect_revert("not an open match"):
+        contract.contest("finding_0", "Same loading control, see caption.")
+    assert _owed(contract, direct_charlie) == STAKE // 2 and contract.get_finding("finding_0").state == "match"
 
 
 def _notice(direct_vm, published, answer="YES"):

@@ -35,7 +35,7 @@ async function rpc(method, params) {
 }
 
 const log = [];
-async function write(c, who, functionName, args, value = 0n, { expectError = false } = {}) {
+async function write(c, who, functionName, args, value = 0n, { expectError = false, allowError = false } = {}) {
   for (let attempt = 1; ; attempt++) {
     let hash;
     try {
@@ -52,8 +52,11 @@ async function write(c, who, functionName, args, value = 0n, { expectError = fal
       }
       const lr = receipt?.consensus_data?.leader_receipt;
       const first = Array.isArray(lr) ? lr[0] : lr;
-      const exec = first?.execution_result ?? "?";
-      let returned = first?.result?.payload?.readable;
+      // A round the validators could not decide leaves the leader's result in the receipt but changes nothing.
+      const rounds = receipt?.consensus_history?.consensus_results ?? [];
+      const decided = rounds.length === 0 || rounds.at(-1)?.consensus_round !== "Undetermined";
+      const exec = decided ? first?.execution_result ?? "?" : "UNDETERMINED";
+      let returned = decided ? first?.result?.payload?.readable : undefined;
       try { returned = JSON.parse(returned); } catch {}
       const row = { who, call: `${functionName}(${args.map((a) => (typeof a === "bigint" ? `${Number(a) / 1e18} GEN` : JSON.stringify(a)).slice(0, 48)).join(", ")})`,
         value: (Number(value) / 1e18).toString(), hash, status: receipt.statusName ?? "ACCEPTED", exec, returned: typeof returned === "string" ? returned : undefined };
@@ -61,7 +64,7 @@ async function write(c, who, functionName, args, value = 0n, { expectError = fal
       log.push(row);
       console.log(`${who.padEnd(10)} ${row.call.slice(0, 64).padEnd(64)} ${row.exec.padEnd(7)} ${hash.slice(0, 12)}${row.returned ? "  -> " + row.returned.slice(0, 150) : ""}${row.refused ? "  !! " + row.refused.slice(0, 120) : ""}`);
       if (expectError && exec === "SUCCESS") throw new Error(`${functionName} was expected to be refused`);
-      if (!expectError && exec !== "SUCCESS") throw new Error(`${functionName} executed with ${exec}: ${row.refused}`);
+      if (!expectError && !allowError && exec !== "SUCCESS") throw new Error(`${functionName} executed with ${exec}: ${row.refused}`);
       return row;
     } catch (err) {
       if (TRANSIENT.test(String(err?.message || err)) && attempt < 4 && !err?.sent && !hash) {
@@ -143,37 +146,41 @@ const CASES = [
   { key: "elife_wells", pmcid: "PMC7665890", figure: "elife-60151-fig5.jpg", a: "176,67,212,103", b: "66,123,102,159", la: "Fig. 5A WT, GLU +", lb: "Fig. 5A KI, GLN +" },
   { key: "elife_wells_different", pmcid: "PMC7665890", figure: "elife-60151-fig5.jpg", a: "66,67,102,103", b: "66,123,102,159", la: "Fig. 5A WT, GLN +", lb: "Fig. 5A KI, GLN +" },
 ];
+// Stakes come out of GEN credited with deposit(): a reading that fails consensus never strands a stake.
+await write(C.reporter, "reporter", "deposit", [], 8n * STAKE);
+await write(C.contester, "contester", "deposit", [], 2n * STAKE);
+await write(C.bystander, "bystander", "deposit", [], STAKE / 2n);
 const ids = {};
 for (const c of CASES) {
-  const r = await write(C.reporter, "reporter", "file_finding", [fid, c.pmcid, c.figure, c.a, c.b, c.la, c.lb], STAKE);
-  if (!String(r.returned).startsWith("finding_")) continue; // refused: the stake is credited back
+  const r = await write(C.reporter, "reporter", "file_finding", [fid, c.pmcid, c.figure, c.a, c.b, c.la, c.lb], 0n, { allowError: true });
+  if (!String(r.returned).startsWith("finding_")) continue; // refused or undecided: the deposit stays credited
   ids[c.key] = r.returned;
   const d = plain(await read(C.sponsor, "get_finding", [ids[c.key]]));
   console.log(`  -> ${ids[c.key]} ${c.key}: ${d.state} (shape ${d.shape}, model ${d.answer}) ${d.why}`);
 }
-// Refused, with the stake credited back.
-await write(C.reporter, "reporter", "file_finding", [fid, "PMC8139131", "fig1.jpg", "10,10,60,60", "100,10,150,60", "A", "B"], STAKE); // retracted
-await write(C.reporter, "reporter", "file_finding", [fid, CASES[0].pmcid, CASES[0].figure, CASES[0].b, CASES[0].a, "x", "y"], STAKE); // same panels
-await write(C.bystander, "bystander", "file_finding", [fid, CASES[0].pmcid, CASES[0].figure, "195,198,348,288", "372,198,525,288", "eIF2a (S51), RKO", "eIF2a (S51), HT29"], STAKE / 2n); // wrong stake
-await write(C.bystander, "bystander", "file_finding", [fid, CASES[0].pmcid, CASES[0].figure, "400,600,450,619", "530,600,580,619", "Actin, RKO", "Actin, HT29"], STAKE); // B outside the figure
+// Refused (the call reverts; the deposit stays credited).
+await write(C.reporter, "reporter", "file_finding", [fid, "PMC8139131", "fig1.jpg", "10,10,60,60", "100,10,150,60", "A", "B"], 0n, { expectError: true }); // retracted
+if (ids.elife_blot) await write(C.reporter, "reporter", "file_finding", [fid, CASES[0].pmcid, CASES[0].figure, CASES[0].b, CASES[0].a, "x", "y"], 0n, { expectError: true }); // same panels
+await write(C.bystander, "bystander", "file_finding", [fid, CASES[0].pmcid, CASES[0].figure, "195,198,348,288", "372,198,525,288", "eIF2a (S51), RKO", "eIF2a (S51), HT29"], 0n, { expectError: true }); // 0.05 GEN credited, 0.1 needed
+await write(C.reporter, "reporter", "file_finding", [fid, CASES[0].pmcid, CASES[0].figure, "400,600,450,619", "530,600,580,619", "Actin, RKO", "Actin, HT29"], 0n, { expectError: true }); // B outside the figure
 await reconcile("after filing");
 
 const state = async (id) => plain(await read(C.sponsor, "get_finding", [id])).state;
 // A co-author contests the PLOS ONE Akt finding; the second look reads the figure's caption, which does not disclose it.
 if (ids.plos_akt && (await state(ids.plos_akt)) === "match") {
-  await write(C.contester, "contester", "contest", [ids.plos_akt, "K028 and M23 were run on separate gels; similar Akt bands are expected for these cell lines."], STAKE);
+  await write(C.contester, "contester", "contest", [ids.plos_akt, "K028 and M23 were run on separate gels; similar Akt bands are expected for these cell lines."], 0n, { allowError: true });
 }
 // The Frontiers caption itself says panels B and E share the loading control.
 if (ids.frontiers_actin && (await state(ids.frontiers_actin)) === "match") {
-  await write(C.contester, "contester", "contest", [ids.frontiers_actin, "The caption says: Image (B) and Image (E) are from the same cells in a same experiment, with the same loading control."], STAKE);
+  await write(C.contester, "contester", "contest", [ids.frontiers_actin, "The caption says: Image (B) and Image (E) are from the same cells in a same experiment, with the same loading control."], 0n, { allowError: true });
 }
-await write(C.reporter, "reporter", "contest", [ids.elife_blot, "My own finding, contested to test the rule."], STAKE, { expectError: true }); // reporters cannot contest themselves
+if (ids.elife_blot) await write(C.reporter, "reporter", "contest", [ids.elife_blot, "My own finding, contested to test the rule."], 0n, { expectError: true }); // reporters cannot contest themselves
 // The authors corrected Figure 5A in 2025: a notice published before the finding was filed.
 for (const key of ["elife_wells", "pnas_tubulin"]) {
   const st = ids[key] && (await state(ids[key]));
-  if (st === "match" || st === "unclear") await write(C.bystander, "bystander", "confirm_by_notice", [ids[key]]);
+  if (st === "match" || st === "unclear") await write(C.bystander, "bystander", "confirm_by_notice", [ids[key]], 0n, { allowError: true });
 }
-await write(C.bystander, "bystander", "settle", [ids.elife_blot], 0n, { expectError: true });
+if (ids.elife_blot) await write(C.bystander, "bystander", "settle", [ids.elife_blot], 0n, { expectError: true });
 await reconcile("after contests and the notice");
 
 // Wait for the contest window, then settle every open match.

@@ -181,9 +181,13 @@ export function useFigureCheckWrite() {
           case "file": {
             const f = await contract.getFund(vars.input.fundId);
             if (f.state !== "open" || todayUtc() > f.ends) refuse("This fund no longer takes findings.");
-            result = await contract.fileFinding(vars.input, vars.stake, onProgress);
+            // Stakes come out of your credit, so a reading the validators cannot decide never strands GEN.
+            if (owedBefore < vars.stake) {
+              onProgress({ step: "awaiting_wallet", message: "First, deposit the stake: approve it in your wallet." });
+              await contract.deposit(vars.stake - owedBefore, onProgress);
+            }
+            result = await contract.fileFinding(vars.input, onProgress);
             if (bradbury) {
-              await refusedPayment(vars.stake, result.txHash);
               const mine = (await contract.getFindings()).filter((d) => sameAddress(d.reporter, address) && d.figure === vars.input.figure);
               result.returned = mine.at(-1)?.id;
             }
@@ -199,8 +203,11 @@ export function useFigureCheckWrite() {
             note = "Confirmed: the reporter's stake and reward are credited.";
             break;
           case "contest": {
-            result = await contract.contest(vars.findingId, vars.explanation, vars.stake, onProgress);
-            if (bradbury) await refusedPayment(vars.stake, result.txHash);
+            if (owedBefore < vars.stake) {
+              onProgress({ step: "awaiting_wallet", message: "First, deposit the stake: approve it in your wallet." });
+              await contract.deposit(vars.stake - owedBefore, onProgress);
+            }
+            result = await contract.contest(vars.findingId, vars.explanation, onProgress);
             const d = await contract.getFinding(vars.findingId);
             note = `Second look: ${STATE_STYLE[d.state]?.label ?? d.state}. ${d.why}`;
             break;

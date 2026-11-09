@@ -59,6 +59,7 @@ export function executionOutcome(receipt: any): { result: string; message: strin
 const WRITE_EFFECT: Record<string, string> = {
   create_fund: "no fund was created",
   fund: "the pot was not changed",
+  deposit: "nothing was credited",
   file_finding: "no finding was filed (the validators may have failed to read PubMed Central or to agree)",
   settle: "the finding was not settled",
   contest: "the contest was not recorded (the validators may have failed to agree)",
@@ -155,14 +156,19 @@ class FigureCheck {
   fund(fundId: string, valueWei: bigint, onProgress?: (p: TxProgress) => void) {
     return this.write("fund", [fundId], valueWei, onProgress);
   }
-  fileFinding(f: FileFindingInput, stakeWei: bigint, onProgress?: (p: TxProgress) => void) {
-    return this.write("file_finding", [f.fundId, f.pmcid, f.figure, f.boxA, f.boxB, f.labelA, f.labelB], stakeWei, onProgress);
+  deposit(valueWei: bigint, onProgress?: (p: TxProgress) => void) {
+    return this.write("deposit", [], valueWei, onProgress);
+  }
+  /** The fund's stake is taken from the caller's credit: deposit it first. */
+  fileFinding(f: FileFindingInput, onProgress?: (p: TxProgress) => void) {
+    return this.write("file_finding", [f.fundId, f.pmcid, f.figure, f.boxA, f.boxB, f.labelA, f.labelB], 0n, onProgress);
   }
   settle(findingId: string, onProgress?: (p: TxProgress) => void) {
     return this.write("settle", [findingId], 0n, onProgress);
   }
-  contest(findingId: string, explanation: string, stakeWei: bigint, onProgress?: (p: TxProgress) => void) {
-    return this.write("contest", [findingId, explanation], stakeWei, onProgress);
+  /** The finding's stake is taken from the caller's credit: deposit it first. */
+  contest(findingId: string, explanation: string, onProgress?: (p: TxProgress) => void) {
+    return this.write("contest", [findingId, explanation], 0n, onProgress);
   }
   confirmByNotice(findingId: string, onProgress?: (p: TxProgress) => void) {
     return this.write("confirm_by_notice", [findingId], 0n, onProgress);
@@ -216,6 +222,19 @@ class FigureCheck {
 
     const status = String(receipt?.statusName ?? receipt?.status_name ?? "ACCEPTED");
     const outcome = executionOutcome(receipt);
+    // After rotating leaders without agreeing, a round ends "Undetermined": the leader's result is in the receipt, but
+    // nothing was applied.
+    const rounds = receipt?.consensus_history?.consensus_results ?? [];
+    if (rounds.length && rounds.at(-1)?.consensus_round === "Undetermined") {
+      throw new TxError({
+        kind: "accepted_no_effect",
+        phase: "verify",
+        txHash,
+        message: `The validators could not agree, so ${WRITE_EFFECT[functionName] ?? "nothing changed"}.`,
+        hint: "Nothing was applied and any stake stays credited to you. This happens when the panels are borderline; try again or withdraw.",
+        detail: rounds.map((r: any) => r?.consensus_round).join(" → "),
+      });
+    }
     onProgress?.({ step: "accepted", txHash, message: `Consensus status: ${status}` });
     // Payable methods refuse by refunding and returning "REFUNDED: <reason>" instead of reverting,
     // because GenLayer keeps a reverted call's value in the contract.

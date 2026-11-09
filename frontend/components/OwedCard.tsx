@@ -31,7 +31,7 @@ export function OwedCard() {
       <h3 className="display text-lg font-bold">Your GEN in FigureCheck</h3>
       <p className="display text-3xl font-bold">{q.isLoading ? "…" : `${formatGen(owed, 4)} GEN`}</p>
       <p className="text-xs text-muted-foreground">
-        Rewards, stakes coming back, payments the contract refused and returned shares are credited here. Withdraw sends them to this wallet
+        Deposits for stakes, rewards, stakes coming back, refused payments and returned shares are credited here; filing or contesting takes its stake from here (the app deposits what is missing first). Withdraw sends them to this wallet
         {net.id === "bradbury" ? "; the transaction prepays the fee of that transfer" : ""}.
       </p>
       <Button size="sm" disabled={owed === 0n || !!pending} onClick={() => writeAsync({ kind: "withdraw" }).catch(() => {})}>

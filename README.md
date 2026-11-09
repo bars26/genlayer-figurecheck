@@ -16,7 +16,9 @@ contract anyone can check and re-check:
 1. A **funder** (an integrity group, a journal, a research funder) opens a **fund**: a reward per confirmed finding, the stake to
    file or contest one, a contest window and a cap per reporter.
 2. A **reporter** opens any article of the **PubMed Central open-access set** by its PMCID, picks a figure, draws a box around
-   panel A, places panel B (same size), names both as the paper labels them, and files the finding with the stake.
+   panel A, places panel B (same size), names both as the paper labels them, and files the finding. The stake comes out of
+   GEN the reporter has `deposit`ed (the app deposits what is missing first), so a reading the validators cannot decide
+   never strands a stake.
 3. **Every validator** lists the article's versions in the PMC open-access bucket, reads its metadata (open access, not
    retracted, license), downloads the figure and **checks it against the md5 PubMed Central publishes**. Then:
    - **in code**, decodes both panels with the contract's own JPEG decoder (GenVM's Pillow cannot read JPEG) and computes a
@@ -24,7 +26,10 @@ contract anyone can check and re-check:
    - unless the score is below 0.5, the validators' **model looks at the two panels side by side**, stretched to full
      contrast and aligned, and answers DUPLICATED, DISTINCT or UNCLEAR: are the specks, band edges and smudges the same?
 4. Code decides: **DUPLICATED with a score of at least 0.6 is a match**; DISTINCT, or a score below 0.5, is **no match** (the
-   stake goes to the fund); anything else is **unclear** (stake back).
+   stake goes to the fund); anything else is **unclear** (stake back). Each validator re-runs the whole reading: everything
+   computed in code must match the leader's exactly, and so must the model's answer, unless the leader's is UNCLEAR. A model
+   that wavers on a borderline pair therefore settles on UNCLEAR instead of failing consensus, and a match or a lost stake
+   always has every validator's DUPLICATED or DISTINCT behind it.
 5. A match is **open to contest** (the authors, or anyone) with the same stake and an explanation. The **second look** shows the
    validators the panels again with the figure's **caption** from the article's JATS XML: still the same image and not disclosed
    → **upheld** (the reporter takes both stakes and the reward); the same image but the caption says so (for example "the same
@@ -39,7 +44,7 @@ contract anyone can check and re-check:
 wallet: the app shows both crops and a preview of the shape score. Writes need MetaMask on GenLayer Studio (chain 61999);
 **Test GEN** funds your wallet.
 
-**Contract:** [`0x97045EFBC8e879d502ed6975B3Ece2f43045ed59`](https://explorer-studio.genlayer.com/address/0x97045EFBC8e879d502ed6975B3Ece2f43045ed59) on GenLayer Studio.
+**Contract:** [`0xB0595462362313C08f7b41dC66BE135eEe8Ce018`](https://explorer-studio.genlayer.com/address/0xB0595462362313C08f7b41dC66BE135eEe8Ce018) on GenLayer Studio.
 
 ## Why GenLayer
 
@@ -70,7 +75,28 @@ wells DUPLICATED. The prompt in the contract asks for coinciding details and pro
 
 ## Verified live, on real papers
 
-DEMO_RESULTS
+`scripts/demo.mjs` (2026-11-09) opened a demo fund (reward 0.5 GEN, stake 0.1 GEN, contest window 10 minutes) and filed
+findings on six pairs of panels from real open-access papers. Every step, checksum, alignment and packet hash is in
+[`docs/REPRODUCTION.md`](docs/REPRODUCTION.md).
+
+| Finding | Paper and panels | What the authors or the paper say | Shape | Validators | Outcome |
+|---|---|---|---|---|---|
+| finding_1 | [PLOS ONE 2013](https://pmc.ncbi.nlm.nih.gov/articles/PMC3572008/), Fig 1B Akt, K028 vs M23 | Corrected 2024: "the AKT immunoblot for M23 was incorrectly duplicated from that for K028" | 0.997 | DUPLICATED | **Match → contested ("separate gels") → upheld.** The second look found the same image and no disclosure in the caption: the reporter took both stakes and the 0.5 GEN reward |
+| finding_3 | [Frontiers 2024](https://pmc.ncbi.nlm.nih.gov/articles/PMC11514072/), Fig 3, actin of panels B and E | The caption: "Image (B) and Image (E) ... with the same loading control" | 0.983 | DUPLICATED | **Match → contested → disclosed.** Same image, disclosed in the caption: stakes back, no reward |
+| finding_2 | [PNAS 2019](https://pmc.ncbi.nlm.nih.gov/articles/PMC6731642/), Fig 2B, A375 tubulin Parental vs AR | Corrected (PMC12745687, 2025-12-19) | 0.992 | UNCLEAR | **Unclear** (16-pixel-high strips) → the correction notice was read → **already known**: acknowledged before filing, no reward |
+| finding_4 | [eLife 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7665890/), Fig 5A, wells WT GLU+ vs KI GLN+ | Corrected (PMC12618004, 2025-11-14) | 0.698 | UNCLEAR | **Unclear** (the duplicate is flipped and re-scaled) → notice read → **already known** |
+| finding_5 | eLife 2020, Fig 5A, wells WT GLN+ vs KI GLN+ | Two different samples | 0.414 | not asked | **No match**: below 0.5 the model is not asked; the stake went to the fund |
+| finding_0 | eLife 2020, Fig 7-S1, GCN2 strip RKO vs HT29 | Corrected (PMC12618004) | 0.922 | UNCLEAR | **Unclear**: DUPLICATED in two earlier runs, UNCLEAR in this one; the cautious rule returned the stake |
+
+Refused (the calls reverted, deposits stayed credited): a seventh finding by the same reporter (cap 6), a finding with 0.05
+GEN deposited for a 0.1 GEN stake, the reporter contesting their own finding, settling an unclear finding, closing the fund
+before its last day, and a fund ending on 2026-02-31 (its 2 GEN credited back and withdrawn). Rewards, stakes and deposits
+were credited and withdrawn (reporter 1.30 GEN, contester 0.10, bystander 0.05), and `totals()` matched the contract's
+balance at all five checkpoints.
+
+What the run shows: the validators were right every time they committed (two matches, both real; two pairs of different
+or disclosed panels never called a hidden duplicate), and cautious when the published figure was too small or the reuse
+was re-scaled. A correction notice turned two of the cautious findings into a recorded acknowledgment.
 
 ## Who can do what (and the attacks this blocks)
 
@@ -79,20 +105,22 @@ DEMO_RESULTS
 | The figure is read from PubMed Central's open-access bucket and must match the md5 PubMed Central publishes | Nobody can submit a doctored copy of a figure |
 | Articles already retracted are refused; only the open-access set is accepted | Findings are about what readers can see and reuse |
 | A shape score below 0.5 forfeits the stake without asking the model; a match needs DUPLICATED and at least 0.6 | Spam costs the reporter; the model cannot make a match on its own |
-| One finding per pair of panels per fund, a cap per reporter, and the exact stake | Nobody farms rewards by re-filing or splitting |
+| One finding per pair of panels per fund, a cap per reporter, and the fund's stake taken from the reporter's deposit | Nobody farms rewards by re-filing or splitting |
+| Stakes are taken from deposited GEN only after the validators agree on a reading | A reading that ends undecided (GenLayer keeps GEN sent with a call that fails consensus) never strands a stake |
+| A validator agrees with a match only on its own DUPLICATED; with an UNCLEAR leader it agrees whatever the model says, as long as the code matches | A wavering model ends in the cautious outcome (stake back, no reward), never in a payout |
 | A reward is held from the pot when a match is filed, so a match is always payable | Funders cannot drain the pot under an open finding |
-| Contests need the same stake, another wallet and an open window; only the figure's own caption counts as disclosure | Reporters cannot contest themselves; contesters cannot talk a match away |
+| Contests need the same stake (from a deposit), another wallet and an open window; only the figure's own caption counts as disclosure | Reporters cannot contest themselves; contesters cannot talk a match away |
 | A correction notice pays only if it was published after the finding was filed | Copying known corrections earns nothing |
 | Rewards, stakes and refunds are credited; only `withdraw` sends GEN, to the caller | No call pays a third party or fails on someone else's behalf |
 | Funders live in their own maps; closing does a fixed amount of work, each share is credited by its own `refund`; a fund closes only with no open match | No fund can grow so large that closing it strands GEN |
-| Payable calls never revert; they credit the GEN back and return `REFUNDED: <reason>`, including dates that do not exist (2026-02-31) | GenLayer keeps the value of a reverted call |
+| Payable calls (`create_fund`, `fund`) never revert; they credit the GEN back and return `REFUNDED: <reason>`, including dates that do not exist (2026-02-31). Filing and contesting send no GEN and simply revert | GenLayer keeps the value of a reverted call |
 
 ## One source, two networks
 
 `contracts/figure_check.py` runs on GenLayer Studio; a short block at its top picks the API names of the newer py-genlayer runner
 that Bradbury testnet (Phase 2) runs, and `scripts/bradbury_source.py` writes `contracts/figure_check.bradbury.py` (the same
 program with the Bradbury header and without comments, checked by comparing syntax trees; Bradbury stores deployed source
-on-chain and a block holds about 38 KB of it). The 43 direct tests run on both files in CI. The app is deployed on Studio; the
+on-chain and a block holds about 38 KB of it). The 44 direct tests run on both files in CI. The app is deployed on Studio; the
 validators' image look was unreliable on Bradbury in November 2026 (two of eight image prompts decided), so FigureCheck is not
 deployed there yet.
 
@@ -115,7 +143,7 @@ deployed there yet.
 pip install -r requirements.txt
 python3 scripts/bradbury_source.py --check
 genvm-lint check contracts/figure_check.py && genvm-lint check contracts/figure_check.bradbury.py
-pytest tests/direct/ -v                     # 43 tests, real PMC figures in tests/fixtures, reads and the model mocked
+pytest tests/direct/ -v                     # 44 tests, real PMC figures in tests/fixtures, reads and the model mocked
 
 # the same tests under the Bradbury runner (genlayer-test 0.30 reads GenVM Manager v0.6.0-rc10)
 pip install "genlayer-test==0.30.0rc2" && FIGURECHECK_NETWORK=bradbury pytest tests/direct/ -v
