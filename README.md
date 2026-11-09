@@ -98,6 +98,12 @@ What the run shows: the validators were right every time they committed (two mat
 or disclosed panels never called a hidden duplicate), and cautious when the published figure was too small or the reuse
 was re-scaled. A correction notice turned two of the cautious findings into a recorded acknowledgment.
 
+**Wallet test from the live app (MetaMask, 2026-11-09):** a bench link opened PLOS ONE 2013
+([PMC3572008](https://pmc.ncbi.nlm.nih.gov/articles/PMC3572008/)) Fig 3C, cyclin D1 of M23 vs K033 (the 2024 correction:
+the K033 image "was accidentally copied" from M23). The app deposited the 0.1 GEN stake, the validators saw DUPLICATED at
+shape 0.993 (`finding_6`), nobody contested within 10 minutes, **Settle confirmed it** and **Withdraw** paid the reporter's
+wallet 0.6 GEN (0.5 reward + stake). The four transactions are in [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md#wallet-test-from-the-live-app).
+
 ## Who can do what (and the attacks this blocks)
 
 | Rule | Why |
@@ -128,7 +134,8 @@ deployed there yet.
 
 - **The bench:** open a PMCID, pick a figure, drag a box around panel A and click where panel B is (arrow buttons nudge it by a
   pixel). Both crops and a preview of the shape score update as you go (the browser decodes the JPEG slightly differently, so
-  the preview can differ in the second decimal). Name both panels and file.
+  the preview can differ in the second decimal). Name both panels and file. A link can open the bench on a pair:
+  `/?pmcid=PMC3572008&figure=pone.0056134.g003.jpg&a=455,251,532,263&b=538,251,615,263&la=…&lb=…`.
 - **Findings:** each with its stamp, the two crops as the validators aligned them, the shape score, what the validators saw,
   the evidence (md5, boxes, alignment, packet), a countdown while it can be contested, and buttons to contest, settle or look
   for a correction notice.

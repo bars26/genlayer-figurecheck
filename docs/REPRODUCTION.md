@@ -50,6 +50,16 @@ contract's on-chain balance, after every transfer had finalized:
 
 Credited before withdrawing: reporter 1.3 GEN, contester 0.1 GEN, bystander 0.05 GEN.
 
+## Wallet test from the live app
+
+Run by hand on 2026-11-09 from https://figurecheck-bars26.vercel.app with MetaMask on GenLayer Studio, opened from a bench link on PLOS ONE PMC3572008 Figure 3C (cyclin D1, M23 vs K033; the 2024 correction says the K033 image was copied from M23). The app deposited the missing stake first, filed the finding, validators saw DUPLICATED at shape 0.993, nobody contested in the 10-minute window, Settle confirmed it and Withdraw paid out the reward plus the stake. Wallet `0x4f80b5c475fced34fc9a07ffccf39e1adc1406bf`.
+
+| Step | GEN sent | Result | Tx |
+|---|---|---|---|
+| deposit (auto, missing stake) | 0.1 | credited 0.1 GEN | [`0xcc8d5e98…`](https://explorer-studio.genlayer.com/tx/0xcc8d5e988ddcbfdc3f2e68992dc7228ef9ee501dd79bf76f6c1daef60f01d6f0) |
+| file_finding PMC3572008 pone.0056134.g003.jpg, boxes 455,251,532,263 / 538,251,615,263 | 0 | match: DUPLICATED, shape 0.993, B offset -1,0, contest until 12:31:59 UTC | [`0x5ad4f4e1…`](https://explorer-studio.genlayer.com/tx/0x5ad4f4e182b80dae4c3f8919371021fdd13e6b6971dcbd880bf1efa9abaa4422) |
+| settle finding_6 after the window | 0 | confirmed: 0.5 GEN reward + 0.1 GEN stake credited | [`0x722d262f…`](https://explorer-studio.genlayer.com/tx/0x722d262fd97eff70e32852452850d79666de469218f6813701675f1e6844722b) |
+| withdraw | 0 | 0.6 GEN sent to the wallet | [`0x209730a2…`](https://explorer-studio.genlayer.com/tx/0x209730a20f3e62ee2673ca5e39975cecaecdbcd478bdc3cac1c9bbb81e9b954c) |
 
 ## Every transaction
 
