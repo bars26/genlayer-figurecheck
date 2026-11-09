@@ -44,7 +44,7 @@ contract anyone can check and re-check:
 wallet: the app shows both crops and a preview of the shape score. Writes need MetaMask on GenLayer Studio (chain 61999);
 **Test GEN** funds your wallet.
 
-**Contract:** [`0x73473596083720B46f27846d214Cec9c00b05e76`](https://explorer-studio.genlayer.com/address/0x73473596083720B46f27846d214Cec9c00b05e76) on GenLayer Studio.
+**Contract:** [`0xf56eBa85685F7Ca624C6078beC9C76cfd48Bd2C0`](https://explorer-studio.genlayer.com/address/0xf56eBa85685F7Ca624C6078beC9C76cfd48Bd2C0) on GenLayer Studio.
 
 ## Why GenLayer
 
@@ -75,34 +75,41 @@ wells DUPLICATED. The prompt in the contract asks for coinciding details and pro
 
 ## Verified live, on real papers
 
-`scripts/demo.mjs` (2026-11-09) opened a demo fund (reward 0.5 GEN, stake 0.1 GEN, contest window 10 minutes) and filed
-findings on six pairs of panels from real open-access papers. Every step, checksum, alignment and packet hash is in
-[`docs/REPRODUCTION.md`](docs/REPRODUCTION.md).
+`scripts/demo.mjs` ran twice on the current contract (2026-11-09), each time opening its own demo fund (reward 0.5 GEN, stake
+0.1 GEN, contest window 10 minutes, 7 findings per reporter) from fresh wallets and filing findings on six pairs of panels from
+real open-access papers. Every step, checksum, alignment and packet hash is in [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md).
 
-| Finding | Paper and panels | What the authors or the paper say | Shape | Validators | Outcome |
-|---|---|---|---|---|---|
-| finding_1 | [PLOS ONE 2013](https://pmc.ncbi.nlm.nih.gov/articles/PMC3572008/), Fig 1B Akt, K028 vs M23 | Corrected 2024: "the AKT immunoblot for M23 was incorrectly duplicated from that for K028" | 0.997 | DUPLICATED | **Match → contested ("separate gels") → upheld.** The second look found the same image and no disclosure in the caption: the reporter took both stakes and the 0.5 GEN reward |
-| finding_3 | [Frontiers 2024](https://pmc.ncbi.nlm.nih.gov/articles/PMC11514072/), Fig 3, actin of panels B and E | The caption: "Image (B) and Image (E) ... with the same loading control" | 0.983 | DUPLICATED | **Match → contested → disclosed.** Same image, disclosed in the caption: stakes back, no reward |
-| finding_2 | [PNAS 2019](https://pmc.ncbi.nlm.nih.gov/articles/PMC6731642/), Fig 2B, A375 tubulin Parental vs AR | Corrected (PMC12745687, 2025-12-19) | 0.992 | UNCLEAR | **Unclear** (16-pixel-high strips) → the correction notice was read → **already known**: acknowledged before filing, no reward |
-| finding_4 | [eLife 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7665890/), Fig 5A, wells WT GLU+ vs KI GLN+ | Corrected (PMC12618004, 2025-11-14) | 0.698 | UNCLEAR | **Unclear** (the duplicate is flipped and re-scaled) → notice read → **already known** |
-| finding_5 | eLife 2020, Fig 5A, wells WT GLN+ vs KI GLN+ | Two different samples | 0.414 | not asked | **No match**: below 0.5 the model is not asked; the stake went to the fund |
-| finding_0 | eLife 2020, Fig 7-S1, GCN2 strip RKO vs HT29 | Corrected (PMC12618004) | 0.922 | UNCLEAR | **Unclear**: DUPLICATED in two earlier runs, UNCLEAR in this one; the cautious rule returned the stake |
+| Pair | What the authors or the paper say | Shape | Run 1 (`fund_0`) | Run 2 (`fund_1`) |
+|---|---|---|---|---|
+| [eLife 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7665890/), Fig 7-S1, GCN2 strip RKO vs HT29 | Corrected (PMC12618004, 2025-11-14) | 0.922 | UNCLEAR: stake back | **DUPLICATED → match → uncontested for 10 minutes → confirmed**, 0.5 GEN reward paid |
+| [PLOS ONE 2013](https://pmc.ncbi.nlm.nih.gov/articles/PMC3572008/), Fig 1B Akt, K028 vs M23 | Corrected 2024: "the AKT immunoblot for M23 was incorrectly duplicated from that for K028" | 0.997 | UNCLEAR | UNCLEAR |
+| [PNAS 2019](https://pmc.ncbi.nlm.nih.gov/articles/PMC6731642/), Fig 2B, A375 tubulin Parental vs AR | Corrected (PMC12745687, 2025-12-19) | 0.992 | UNCLEAR → notice read → **already known** | UNCLEAR → **already known** |
+| [eLife 2020](https://pmc.ncbi.nlm.nih.gov/articles/PMC7665890/), Fig 5A, wells WT GLU+ vs KI GLN+ | Corrected (PMC12618004); the duplicate is flipped and re-scaled | 0.698 | UNCLEAR → **already known** | UNCLEAR → **already known** |
+| [Frontiers 2024](https://pmc.ncbi.nlm.nih.gov/articles/PMC11514072/), Fig 3, actin of panels B and E | The caption discloses the shared loading control | 0.983 | UNCLEAR | UNCLEAR |
+| eLife 2020, Fig 5A, wells WT GLN+ vs KI GLN+ | Two different samples | 0.414 | **No match** (the model is not asked below 0.5; stake to the fund), then filed again: panels judged different stay free | same |
 
-Refused (the calls reverted, deposits stayed credited): a seventh finding by the same reporter (cap 6), a finding with 0.05
-GEN deposited for a 0.1 GEN stake, the reporter contesting their own finding, settling an unclear finding, closing the fund
-before its last day, and a fund ending on 2026-02-31 (its 2 GEN credited back and withdrawn). Rewards, stakes and deposits
-were credited and withdrawn (reporter 1.30 GEN, contester 0.10, bystander 0.05), and `totals()` matched the contract's
-balance at all five checkpoints.
+Refused in both runs (the calls reverted, deposits stayed credited): a retracted article, the same panels with A and B swapped,
+**the same panels with both boxes shifted by 2 pixels** by another wallet, a 0.1 GEN stake with 0.05 GEN deposited, a box outside
+the figure, an eighth finding by one reporter, settling an unclear finding or a match before its window ends, the reporter
+contesting their own match, closing a fund before its last day, and a fund ending on 2026-02-31 (its 2 GEN credited back and
+withdrawn). `totals()` matched the contract's balance at all ten checkpoints.
 
-What the run shows: the validators were right every time they committed (two matches, both real; two pairs of different
-or disclosed panels never called a hidden duplicate), and cautious when the published figure was too small or the reuse
-was re-scaled. A correction notice turned two of the cautious findings into a recorded acknowledgment.
+The contest paths ran live on the previous deployment
+([`0xB0595462…E018`](https://explorer-studio.genlayer.com/address/0xB0595462362313C08f7b41dC66BE135eEe8Ce018), the same code
+except the duplicate rule above): the PLOS ONE Akt match, contested as "separate gels", was **upheld** (the reporter took both
+stakes and the reward), and the Frontiers actin match, contested with the caption, was found **disclosed** (stakes back, no
+reward). The direct tests cover every contest outcome.
+
+What the runs show: the validators never called two different or disclosed images a hidden duplicate, and they are cautious:
+on small blot strips they often answer UNCLEAR even for a corrected duplicate, which returns the stake and leaves the finding
+open to a correction notice. Two of those cautious findings became recorded acknowledgments from the authors' own notices.
 
 **Wallet test from the live app (MetaMask, 2026-11-09):** a bench link opened PLOS ONE 2013
 ([PMC3572008](https://pmc.ncbi.nlm.nih.gov/articles/PMC3572008/)) Fig 3C, cyclin D1 of M23 vs K033 (the 2024 correction:
 the K033 image "was accidentally copied" from M23). The app deposited the 0.1 GEN stake, the validators saw DUPLICATED at
-shape 0.993 (`finding_6`), nobody contested within 10 minutes, **Settle confirmed it** and **Withdraw** paid the reporter's
-wallet 0.6 GEN (0.5 reward + stake). The four transactions are in [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md#wallet-test-from-the-live-app).
+shape 0.993 (`finding_13`), nobody contested within 10 minutes, **Settle confirmed it** and **Withdraw** paid the reporter's
+wallet 0.6 GEN (0.5 reward + stake). Nudging box B by a pixel or two afterwards, the bench flagged that the boxes still cover
+`finding_13`'s panels. The four transactions are in [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md#wallet-test-from-the-live-app).
 
 ## Who can do what (and the attacks this blocks)
 

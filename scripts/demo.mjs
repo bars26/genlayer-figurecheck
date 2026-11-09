@@ -53,7 +53,12 @@ async function write(c, who, functionName, args, value = 0n, { expectError = fal
       const lr = receipt?.consensus_data?.leader_receipt;
       const first = Array.isArray(lr) ? lr[0] : lr;
       // A round the validators could not decide leaves the leader's result in the receipt but changes nothing.
-      const rounds = receipt?.consensus_history?.consensus_results ?? [];
+      // A receipt can be ACCEPTED while leaders are still rotating: wait until the last round is Accepted or Undetermined.
+      let rounds = receipt?.consensus_history?.consensus_results ?? [];
+      for (let poll = 0; rounds.length && !["Accepted", "Undetermined"].includes(rounds.at(-1)?.consensus_round) && poll < 60; poll++) {
+        await sleep(5000);
+        try { rounds = (await c.getTransaction({ hash }))?.consensus_history?.consensus_results ?? rounds; } catch {}
+      }
       const decided = rounds.length === 0 || rounds.at(-1)?.consensus_round !== "Undetermined";
       const exec = decided ? first?.execution_result ?? "?" : "UNDETERMINED";
       let returned = decided ? first?.result?.payload?.readable : undefined;
@@ -125,14 +130,15 @@ const reconcile = async (label) => {
 };
 
 const ENDS = new Date(Date.now() + 60 * 86_400_000).toISOString().slice(0, 10);
+const CAP = 7; // findings per reporter
 const REWARD = GEN / 2n, STAKE = GEN / 10n, MINUTES = 10;
 const firstFund = (await read(C.sponsor, "get_funds", [0, 200])).length;
 const fid = `fund_${firstFund}`;
 
-await write(C.sponsor, "sponsor", "create_fund", ["Image integrity in open-access papers", "2026-02-31", REWARD, STAKE, MINUTES, 6], 2n * GEN); // no such date
+await write(C.sponsor, "sponsor", "create_fund", ["Image integrity in open-access papers", "2026-02-31", REWARD, STAKE, MINUTES, CAP], 2n * GEN); // no such date
 await reconcile("after a refused fund: its GEN is credited back");
 await write(C.sponsor, "sponsor", "withdraw", []);
-await write(C.sponsor, "sponsor", "create_fund", ["Image integrity in open-access papers", ENDS, REWARD, STAKE, MINUTES, 6], 3n * GEN);
+await write(C.sponsor, "sponsor", "create_fund", ["Image integrity in open-access papers", ENDS, REWARD, STAKE, MINUTES, CAP], 3n * GEN);
 await write(C.bystander, "bystander", "fund", [fid], GEN);
 
 // Six real cases. eLife 2020 (PMC7665890), PLOS ONE 2013 (PMC3572008) and PNAS 2019 (PMC6731642) were later corrected by
@@ -164,6 +170,13 @@ if (ids.elife_blot) await write(C.reporter, "reporter", "file_finding", [fid, CA
 if (ids.plos_akt) await write(C.bystander, "bystander", "file_finding", [fid, "PMC3572008", "pone.0056134.g001.jpg", "270,354,379,370", "519,354,628,370", "Akt K028", "Akt M23"], 0n, { expectError: true }); // the same panels, boxes shifted by 2 px
 await write(C.bystander, "bystander", "file_finding", [fid, CASES[0].pmcid, CASES[0].figure, "195,198,348,288", "372,198,525,288", "eIF2a (S51), RKO", "eIF2a (S51), HT29"], 0n, { expectError: true }); // 0.05 GEN credited, 0.1 needed
 await write(C.reporter, "reporter", "file_finding", [fid, CASES[0].pmcid, CASES[0].figure, "400,600,450,619", "530,600,580,619", "Actin, RKO", "Actin, HT29"], 0n, { expectError: true }); // B outside the figure
+// Panels judged different stay free: the reporter files the different wells again (no match again, the stake goes
+// to the fund) until the cap, and the next finding is refused.
+const wells = CASES.find((c) => c.key === "elife_wells_different");
+for (let filed = Object.keys(ids).length; filed < CAP && ids.elife_wells_different; filed++) {
+  await write(C.reporter, "reporter", "file_finding", [fid, wells.pmcid, wells.figure, wells.a, wells.b, wells.la, wells.lb]);
+}
+await write(C.reporter, "reporter", "file_finding", [fid, wells.pmcid, wells.figure, wells.a, wells.b, wells.la, wells.lb], 0n, { expectError: true }); // over the cap
 await reconcile("after filing");
 
 const state = async (id) => plain(await read(C.sponsor, "get_finding", [id])).state;
@@ -175,7 +188,12 @@ if (ids.plos_akt && (await state(ids.plos_akt)) === "match") {
 if (ids.frontiers_actin && (await state(ids.frontiers_actin)) === "match") {
   await write(C.contester, "contester", "contest", [ids.frontiers_actin, "The caption says: Image (B) and Image (E) are from the same cells in a same experiment, with the same loading control."], 0n, { allowError: true });
 }
-if (ids.elife_blot) await write(C.reporter, "reporter", "contest", [ids.elife_blot, "My own finding, contested to test the rule."], 0n, { expectError: true }); // reporters cannot contest themselves
+// Reporters cannot contest their own match.
+for (const id of Object.values(ids)) {
+  if ((await state(id)) !== "match") continue;
+  await write(C.reporter, "reporter", "contest", [id, "My own finding, contested to test the rule."], 0n, { expectError: true });
+  break;
+}
 // The authors corrected Figure 5A in 2025: a notice published before the finding was filed.
 for (const key of ["elife_wells", "pnas_tubulin"]) {
   const st = ids[key] && (await state(ids[key]));

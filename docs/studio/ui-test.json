@@ -1,0 +1,11 @@
+{
+  "note": "Run by hand on 2026-11-09 from https://figurecheck-bars26.vercel.app with MetaMask on GenLayer Studio, opened from a bench link on PLOS ONE PMC3572008 Figure 3C (cyclin D1, M23 vs K033; the 2024 correction says the K033 image was copied from M23). The app deposited the missing stake first, filed the finding in fund_0, validators saw DUPLICATED at shape 0.993, nobody contested in the 10-minute window, Settle confirmed it and Withdraw paid out the reward plus the stake. Nudging box B afterwards, the bench showed that the boxes still cover finding_13's panels.",
+  "wallet": "0x4f80b5c475fced34fc9a07ffccf39e1adc1406bf",
+  "finding": "finding_13",
+  "steps": [
+    ["deposit (auto, missing stake)", "0.1", "credited 0.1 GEN", "0xf7f1f2ab8e49043435863ccfd3595d0c6e37856e2d874e92d05044ec09fe7a15"],
+    ["file_finding fund_0 PMC3572008 pone.0056134.g003.jpg, boxes 455,251,532,263 / 538,251,615,263", "0", "finding_13 match: DUPLICATED, shape 0.993", "0xd3a831d80475681fff946b93519caae1cad6b391f8e0e788f5735c9d5497dd86"],
+    ["settle finding_13 after the window", "0", "confirmed: 0.5 GEN reward + 0.1 GEN stake credited", "0xa65441b3aaa4a00b1a6340fe41f448405265553df55e69d9f73d9c1dccfca66d"],
+    ["withdraw", "0", "0.6 GEN sent to the wallet", "0x811d20ed781b0482eb8bbb2abc874a29f423ed92ea8afb90f63b4a3570418ba8"]
+  ]
+}

@@ -287,6 +287,15 @@ export function FigureBench({ funds, findings }: { funds: Fund[]; findings: Find
                         Below 0.5 the stake is lost without a model look; a match needs 0.6 and the validators&apos; DUPLICATED. Bands often score high
                         without being the same image: the validators decide.
                       </p>
+                      {already && (
+                        <p className="text-destructive font-semibold">
+                          These boxes cover the same panels as{" "}
+                          <a className="underline" href={`#${already.id}`}>
+                            {already.id}
+                          </a>
+                          : moving or resizing a box does not make a new finding.
+                        </p>
+                      )}
                     </>
                   ) : (
                     <p className="text-destructive">Both boxes must lie inside the figure.</p>

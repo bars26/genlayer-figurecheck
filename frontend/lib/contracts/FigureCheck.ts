@@ -224,7 +224,17 @@ class FigureCheck {
     const outcome = executionOutcome(receipt);
     // After rotating leaders without agreeing, a round ends "Undetermined": the leader's result is in the receipt, but
     // nothing was applied.
-    const rounds = receipt?.consensus_history?.consensus_results ?? [];
+    // A receipt can read ACCEPTED while leaders are still rotating: wait until the last round is final.
+    let rounds: any[] = receipt?.consensus_history?.consensus_results ?? [];
+    for (let poll = 0; rounds.length && !["Accepted", "Undetermined"].includes(rounds.at(-1)?.consensus_round) && poll < 60; poll++) {
+      onProgress?.({ step: "submitted", txHash, message: "Validators are still deciding (a new leader is taking over)." });
+      await new Promise((r) => setTimeout(r, 5000));
+      try {
+        rounds = ((await this.client.getTransaction({ hash: txHash as any })) as any)?.consensus_history?.consensus_results ?? rounds;
+      } catch {
+        // keep the last rounds we saw
+      }
+    }
     if (rounds.length && rounds.at(-1)?.consensus_round === "Undetermined") {
       throw new TxError({
         kind: "accepted_no_effect",
