@@ -87,6 +87,15 @@ export function FigureBench({ funds, findings }: { funds: Fund[]; findings: Find
     setMode("a");
   };
 
+  // A link can open the bench on a pair: ?pmcid=PMC123&figure=f.jpg&a=x0,y0,x1,y1&b=…&la=…&lb=…
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const id = (p.get("pmcid") ?? "").trim().toUpperCase();
+    if (!/^PMC\d{1,9}$/.test(id)) return;
+    sample({ name: "", pmcid: id, figure: p.get("figure") ?? "", a: p.get("a") ?? "", b: p.get("b") ?? "", la: p.get("la") ?? "", lb: p.get("lb") ?? "" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Mouse position in the figure's own pixels.
   const toPx = (e: React.PointerEvent): [number, number] | null => {
     if (!stage.current || !pic) return null;
