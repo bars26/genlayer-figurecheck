@@ -120,6 +120,17 @@ export function parseBox(s: string): Box | null {
   return b[2] > b[0] && b[3] > b[1] ? b : null;
 }
 export const boxText = (b: Box) => b.join(",");
+// Same rule as the contract: two boxes cover the same panel when they overlap by at least half of the smaller one.
+const covers = (p: Box, q: Box) => {
+  const w = Math.min(p[2], q[2]) - Math.max(p[0], q[0]);
+  const h = Math.min(p[3], q[3]) - Math.max(p[1], q[1]);
+  const small = Math.min((p[2] - p[0]) * (p[3] - p[1]), (q[2] - q[0]) * (q[3] - q[1]));
+  return w > 0 && h > 0 && 2 * w * h >= small;
+};
+export function samePair(a: Box, b: Box, c: Box | null, d: Box | null): boolean {
+  if (!c || !d) return false;
+  return (covers(a, c) && covers(b, d)) || (covers(a, d) && covers(b, c));
+}
 
 export const sameAddress = (a?: string | null, b?: string | null) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 export const short = (a: string) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "");

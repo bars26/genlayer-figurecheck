@@ -161,6 +161,7 @@ for (const c of CASES) {
 // Refused (the call reverts; the deposit stays credited).
 await write(C.reporter, "reporter", "file_finding", [fid, "PMC8139131", "fig1.jpg", "10,10,60,60", "100,10,150,60", "A", "B"], 0n, { expectError: true }); // retracted
 if (ids.elife_blot) await write(C.reporter, "reporter", "file_finding", [fid, CASES[0].pmcid, CASES[0].figure, CASES[0].b, CASES[0].a, "x", "y"], 0n, { expectError: true }); // same panels
+if (ids.plos_akt) await write(C.bystander, "bystander", "file_finding", [fid, "PMC3572008", "pone.0056134.g001.jpg", "270,354,379,370", "519,354,628,370", "Akt K028", "Akt M23"], 0n, { expectError: true }); // the same panels, boxes shifted by 2 px
 await write(C.bystander, "bystander", "file_finding", [fid, CASES[0].pmcid, CASES[0].figure, "195,198,348,288", "372,198,525,288", "eIF2a (S51), RKO", "eIF2a (S51), HT29"], 0n, { expectError: true }); // 0.05 GEN credited, 0.1 needed
 await write(C.reporter, "reporter", "file_finding", [fid, CASES[0].pmcid, CASES[0].figure, "400,600,450,619", "530,600,580,619", "Actin, RKO", "Actin, HT29"], 0n, { expectError: true }); // B outside the figure
 await reconcile("after filing");

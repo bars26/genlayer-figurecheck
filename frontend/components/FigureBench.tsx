@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, Loader2, Search } from "lucide-react";
-import { articleUrl, boxText, figureUrl, formatGen, parseBox, todayUtc, type Box, type Finding, type Fund } from "@/lib/contracts/types";
+import { articleUrl, boxText, figureUrl, formatGen, parseBox, samePair, todayUtc, type Box, type Finding, type Fund } from "@/lib/contracts/types";
 import { useWallet } from "@/lib/genlayer/wallet";
 import { useFigureCheckWrite } from "@/lib/hooks/useFigureCheck";
 import { TRANSFORM_NAMES, drawCrop, loadLuma, shapeScore, type Luma } from "@/lib/pixels";
@@ -137,7 +137,9 @@ export function FigureBench({ funds, findings }: { funds: Fund[]; findings: Find
   const w = a ? a[2] - a[0] : 0;
   const h = a ? a[3] - a[1] : 0;
   const sizeOk = !!a && w >= 12 && h >= 12 && w <= 360 && h <= 360;
-  const already = paper && a && b ? findings.find((d) => d.pmcid === paper.pmcid && d.figure === figure && [d.box_a, d.box_b].sort().join() === [boxText(a), boxText(b)].sort().join()) : undefined;
+  const already = paper && a && b && fund
+    ? findings.find((d) => d.fund_id === fund.id && d.pmcid === paper.pmcid && d.figure === figure && d.state !== "no_match" && d.state !== "overturned" && samePair(a, b, parseBox(d.box_a), parseBox(d.box_b)))
+    : undefined;
   const pct = (v: number, of: number) => `${(100 * v) / of}%`;
 
   return (

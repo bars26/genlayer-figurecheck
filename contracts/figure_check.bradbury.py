@@ -16,6 +16,12 @@ def _message_raw() -> dict:
  return gl.message.raw
 def _send(to: Address, amount: int) -> None:
  gl.evm.Account(to).emit_call(u256(amount), b"")
+_Err = gl.vm.UserError
+_ERROR = '{"state": "error"}'
+def _s(body: bytes) -> str:
+ return body.decode("utf-8", "replace")
+def _plus(v, n: int) -> u256:
+ return u256(int(v) + n)
 FUND_OPEN = "open"
 FUND_CLOSED = "closed"
 NO_MATCH = "no_match"
@@ -36,6 +42,7 @@ _BUCKET = "https://pmc-oa-opendata.s3.amazonaws.com"
 _EPMC = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 _MIN_FUND = 10**17
 _MIN_STAKE = 10**16
+_PER_FIGURE = 24
 _MAX_FUND_DAYS = 366
 _DAY = 86400
 _HISTORY_LIMIT = 20
@@ -287,6 +294,13 @@ def parse_box(text) -> list:
   return []
  b = [int(v) for v in m.groups()]
  return b if b[2] > b[0] and b[3] > b[1] else []
+def _covers(p: list, q: list) -> bool:
+ w = min(p[2], q[2]) - max(p[0], q[0])
+ h = min(p[3], q[3]) - max(p[1], q[1])
+ small = min((p[2] - p[0]) * (p[3] - p[1]), (q[2] - q[0]) * (q[3] - q[1]))
+ return w > 0 and h > 0 and 2 * w * h >= small
+def same_pair(a: list, b: list, c: list, d: list) -> bool:
+ return (_covers(a, c) and _covers(b, d)) or (_covers(a, d) and _covers(b, c))
 def _get(url: str):
  try:
   r = gl.nondet.web.get(url, headers=_HEADERS)
@@ -301,7 +315,7 @@ def _latest_version(pmcid: str):
  state, body = _get(f"{_BUCKET}/?list-type=2&prefix={pmcid}.&delimiter=/")
  if state != "ok":
   return None
- found = re.findall(r"<Prefix>(" + re.escape(pmcid) + r"\.(\d+))/</Prefix>", body.decode("utf-8", "replace"))
+ found = re.findall(r"<Prefix>(" + re.escape(pmcid) + r"\.(\d+))/</Prefix>", _s(body))
  return max(found, key=lambda f: int(f[1]))[0] if found else ""
 def _caption(xml: str, figure: str) -> str:
  m = re.search(r'xlink:href="' + re.escape(figure.rsplit(".", 1)[0]) + r'(\.[a-z]+)?"', xml)
@@ -375,7 +389,7 @@ def first_look(pmcid: str, figure: str, box_a: list, box_b: list, label_a: str, 
  if state != "ok":
   return {"state": "error"}
  try:
-  meta = json.loads(body.decode("utf-8", "replace"))
+  meta = json.loads(_s(body))
  except ValueError:
   return {"state": "error"}
  if not meta.get("is_pmc_openaccess"):
@@ -488,7 +502,7 @@ class FigureCheck(_Contract):
  funder_at: TreeMap[str, str]
  refunded: TreeMap[str, bool]
  filed_by: TreeMap[str, u256]
- taken: TreeMap[str, str]
+ on_figure: TreeMap[str, str]
  owed: TreeMap[str, u256]
  fund_count: u256
  finding_count: u256
@@ -510,12 +524,12 @@ class FigureCheck(_Contract):
  def _fund(self, fund_id: str) -> Fund:
   fund_id = self._text(fund_id)
   if fund_id not in self.funds:
-   raise gl.vm.UserError(f"No fund with id {fund_id}")
+   raise _Err(f"No fund with id {fund_id}")
   return self.funds[fund_id]
  def _finding(self, finding_id: str) -> Finding:
   finding_id = self._text(finding_id)
   if finding_id not in self.findings:
-   raise gl.vm.UserError(f"No finding with id {finding_id}")
+   raise _Err(f"No finding with id {finding_id}")
   return self.findings[finding_id]
  def _log(self, f: Fund, event: str, **fields) -> None:
   history = json.loads(f.history_json) if f.history_json else []
@@ -527,15 +541,15 @@ class FigureCheck(_Contract):
   if amount > 0:
    key = to.as_hex.lower()
    self.owed[key] = u256(int(self.owed.get(key, u256(0))) + amount)
-   self.owed_total = u256(int(self.owed_total) + amount)
+   self.owed_total = _plus(self.owed_total, amount)
  def _take(self, who: Address, amount: int, check: bool = False) -> None:
   key = who.as_hex.lower()
   have = int(self.owed.get(key, u256(0)))
   if have < amount:
-   raise gl.vm.UserError(f"deposit the stake first: {amount} wei needed, {have} credited")
+   raise _Err(f"deposit the stake first: {amount} wei needed, {have} credited")
   if not check:
    self.owed[key] = u256(have - amount)
-   self.owed_total = u256(int(self.owed_total) - amount)
+   self.owed_total = _plus(self.owed_total, -amount)
  def _reject(self, reason: str) -> str:
   self._credit(gl.message.sender_address, int(gl.message.value))
   return f"REFUNDED: {reason} (your GEN is credited back: withdraw it)"
@@ -544,24 +558,24 @@ class FigureCheck(_Contract):
   before = int(self.funds_in.get(key, u256(0)))
   if before == 0:
    self.funder_at[f"{f.id}|{int(f.n_funders)}"] = address.as_hex
-   f.n_funders = u256(int(f.n_funders) + 1)
+   f.n_funders = _plus(f.n_funders, 1)
   self.funds_in[key] = u256(before + value)
-  f.pot = u256(int(f.pot) + value)
-  f.funded_total = u256(int(f.funded_total) + value)
+  f.pot = _plus(f.pot, value)
+  f.funded_total = _plus(f.funded_total, value)
  def _release(self, f: Fund, d: Finding) -> None:
-  f.pot = u256(int(f.pot) + int(d.reward))
-  f.reserved = u256(int(f.reserved) - int(d.reward))
+  f.pot = _plus(f.pot, int(d.reward))
+  f.reserved = _plus(f.reserved, -int(d.reward))
   d.reward = u256(0)
  def _reserve(self, f: Fund, d: Finding) -> None:
   if int(f.pot) >= int(f.reward):
    d.reward = u256(int(f.reward))
-   f.pot = u256(int(f.pot) - int(f.reward))
-   f.reserved = u256(int(f.reserved) + int(f.reward))
+   f.pot = _plus(f.pot, -int(f.reward))
+   f.reserved = _plus(f.reserved, int(f.reward))
  def _close_match(self, d: Finding) -> None:
-  self.open_stakes = u256(int(self.open_stakes) - int(d.stake))
+  self.open_stakes = _plus(self.open_stakes, -int(d.stake))
  def _pay_reward(self, f: Fund, d: Finding) -> None:
-  f.reserved = u256(int(f.reserved) - int(d.reward))
-  f.paid_total = u256(int(f.paid_total) + int(d.reward))
+  f.reserved = _plus(f.reserved, -int(d.reward))
+  f.paid_total = _plus(f.paid_total, int(d.reward))
   self._credit(d.reporter, int(d.reward))
  @gl.public.write.payable
  def create_fund(self, title: str, ends: str, reward: int, stake: int, contest_minutes: int, per_reporter: int) -> str:
@@ -581,7 +595,7 @@ class FigureCheck(_Contract):
    return self._reject("amounts and counts must be whole numbers")
   reward_w, stake_w, minutes, cap = (int(n) for n in nums)
   if min(reward_w, stake_w) < _MIN_STAKE or not 10 <= minutes <= 43200 or not 1 <= cap <= 100:
-   return self._reject("reward and stake at least 0.01 GEN, contest_minutes 10 to 43200, per_reporter 1 to 100")
+   return self._reject("reward, stake >= 0.01 GEN; contest_minutes 10-43200; per_reporter 1-100")
   value = int(gl.message.value)
   if value < max(reward_w, _MIN_FUND):
    return self._reject("fund it with at least one reward and 0.1 GEN")
@@ -592,7 +606,7 @@ class FigureCheck(_Contract):
     funded_total=u256(0), paid_total=u256(0), returnable=u256(0), returned_total=u256(0), n_funders=u256(0),
     n_refunded=u256(0), n_findings=u256(0), created_at=self._now(), history_json="[]")
   self._add_funds(f, sender, value)
-  self.fund_count = u256(int(self.fund_count) + 1)
+  self.fund_count = _plus(self.fund_count, 1)
   self._log(f, "created", amount=str(value))
   self.funds[fund_id] = f
   return fund_id
@@ -613,39 +627,43 @@ class FigureCheck(_Contract):
  @gl.public.write.payable
  def deposit(self) -> str:
   if int(gl.message.value) <= 0:
-   raise gl.vm.UserError("send some GEN to deposit")
+   raise _Err("send some GEN to deposit")
   self._credit(gl.message.sender_address, int(gl.message.value))
   return str(int(self.owed[gl.message.sender_address.as_hex.lower()]))
  @gl.public.write
  def file_finding(self, fund_id: str, pmcid: str, figure: str, box_a: str, box_b: str, label_a: str, label_b: str) -> str:
   f = self._fund(fund_id)
   if f.state != FUND_OPEN or self._now()[:10] > f.ends:
-   raise gl.vm.UserError("This fund no longer takes findings")
+   raise _Err("This fund no longer takes findings")
   pmcid, figure = self._text(pmcid).upper(), self._text(figure)
   label_a, label_b = self._text(label_a)[:60], self._text(label_b)[:60]
   if not re.match(r"^PMC\d{4,9}$", pmcid) or not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.jpe?g$", figure):
-   raise gl.vm.UserError("pmcid like PMC1234567 and the figure's JPEG file name in PubMed Central")
+   raise _Err("pmcid like PMC1234567 and the figure's JPEG file name")
   a, b = parse_box(box_a), parse_box(box_b)
   w, h = (a[2] - a[0], a[3] - a[1]) if a else (0, 0)
   if not a or not b or (b[2] - b[0], b[3] - b[1]) != (w, h) or not (12 <= w <= 360 and 12 <= h <= 360):
-   raise gl.vm.UserError('boxes "x0,y0,x1,y1" of the same size, 12 to 360 pixels a side')
+   raise _Err('boxes "x0,y0,x1,y1" of the same size, 12 to 360 pixels a side')
   if not label_a or not label_b:
-   raise gl.vm.UserError("name both panels as the paper labels them")
+   raise _Err("name both panels as the paper labels them")
   reporter = gl.message.sender_address
   rkey = f"{f.id}|{reporter.as_hex.lower()}"
   if int(self.filed_by.get(rkey, u256(0))) >= int(f.per_reporter):
-   raise gl.vm.UserError(f"at most {int(f.per_reporter)} findings per reporter in this fund")
-  boxes = sorted([",".join(str(v) for v in a), ",".join(str(v) for v in b)])
-  key = f"{f.id}|{pmcid}|{figure}|{boxes[0]}|{boxes[1]}"
-  if key in self.taken:
-   raise gl.vm.UserError(f"{self.taken[key]} already reports these panels")
+   raise _Err(f"at most {int(f.per_reporter)} findings per reporter in this fund")
+  key = f"{f.id}|{pmcid}|{figure}"
+  ids = self.on_figure.get(key, "").split()
+  if len(ids) >= _PER_FIGURE:
+   raise _Err(f"at most {_PER_FIGURE} findings per figure in this fund")
+  for other in ids:
+   o = self.findings[other]
+   if o.state not in (NO_MATCH, OVERTURNED) and same_pair(a, b, parse_box(o.box_a), parse_box(o.box_b)):
+    raise _Err(f"{other} already reports these panels")
   stake = int(f.stake)
   self._take(reporter, stake, check=True)
   def run() -> str:
    return json.dumps(first_look(pmcid, figure, a, b, label_a, label_b), sort_keys=True)
   look = json.loads(gl.vm.run_nondet(run, _validator(run, ("UNCLEAR",))))
   if look["state"] != "ok":
-   raise gl.vm.UserError(f"{pmcid}/{figure}: {look['state'].replace('_', ' ')}" + (f" (the figure is {look['size'][0]}x{look['size'][1]})" if look["state"] == "outside" else ""))
+   raise _Err(f"{pmcid}/{figure}: {look['state'].replace('_', ' ')}" + (f" (the figure is {look['size'][0]}x{look['size'][1]})" if look["state"] == "outside" else ""))
   self._take(reporter, stake)
   state = verdict(look)
   finding_id = f"finding_{int(self.finding_count)}"
@@ -662,7 +680,7 @@ class FigureCheck(_Contract):
      contester=Address(b"\x00" * 20), contest_text="", contest_answer="", notice="", settled_at="")
   if state == NO_MATCH:
    d.why = f"Not the same image (shape {d.shape}, validators: {look['answer']}); stake to the fund"
-   f.pot = u256(int(f.pot) + stake)
+   f.pot = _plus(f.pot, stake)
    d.settled_at = now
   elif state == UNCLEAR:
    d.why = f"Could not tell (shape {d.shape}, validators: {look['answer']}); stake back"
@@ -670,12 +688,12 @@ class FigureCheck(_Contract):
   else:
    d.why = f"Same image (shape {d.shape}); open to contest"
    d.deadline = datetime.fromtimestamp(self._seconds(now) + int(f.contest_minutes) * 60, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-   self.open_stakes = u256(int(self.open_stakes) + stake)
+   self.open_stakes = _plus(self.open_stakes, stake)
    self._reserve(f, d)
-  self.taken[key] = finding_id
+  self.on_figure[key] = " ".join(ids + [finding_id])
   self.filed_by[rkey] = u256(int(self.filed_by.get(rkey, u256(0))) + 1)
-  self.finding_count = u256(int(self.finding_count) + 1)
-  f.n_findings = u256(int(f.n_findings) + 1)
+  self.finding_count = _plus(self.finding_count, 1)
+  f.n_findings = _plus(f.n_findings, 1)
   self._log(f, "finding", finding=finding_id, state=state)
   self.findings[finding_id] = d
   return finding_id
@@ -683,9 +701,9 @@ class FigureCheck(_Contract):
  def settle(self, finding_id: str) -> str:
   d = self._finding(finding_id)
   if d.state != MATCH:
-   raise gl.vm.UserError(f"{d.id} is {d.state}, not an open match")
+   raise _Err(f"{d.id} is {d.state}, not an open match")
   if self._now() <= d.deadline:
-   raise gl.vm.UserError(f"{d.id} can be contested until {d.deadline} UTC")
+   raise _Err(f"{d.id} can be contested until {d.deadline} UTC")
   f = self.funds[d.fund_id]
   d.state = CONFIRMED
   d.why = f"Confirmed: same image, uncontested by {d.deadline} UTC"
@@ -699,13 +717,13 @@ class FigureCheck(_Contract):
  def contest(self, finding_id: str, explanation: str) -> str:
   d = self._finding(finding_id)
   if d.state != MATCH or self._now() > d.deadline:
-   raise gl.vm.UserError(f"{d.id} is not an open match")
+   raise _Err(f"{d.id} is not an open match")
   sender = gl.message.sender_address
   if sender == d.reporter:
-   raise gl.vm.UserError("the reporter cannot contest their own finding")
+   raise _Err("the reporter cannot contest their own finding")
   explanation = self._text(explanation)
   if not 10 <= len(explanation) <= 600:
-   raise gl.vm.UserError("explanation must be 10 to 600 characters")
+   raise _Err("explanation must be 10 to 600 characters")
   self._take(sender, int(d.stake), check=True)
   version, figure, md5 = d.version, d.figure, d.md5
   a, b = parse_box(d.box_a), parse_box(d.box_b)
@@ -714,8 +732,8 @@ class FigureCheck(_Contract):
    state, xml = _get(f"{_BUCKET}/{version}/{version}.xml")
    state2, jpg = _get(f"{_BUCKET}/{version}/{figure}")
    if state != "ok" or state2 != "ok" or hashlib.md5(jpg).hexdigest() != md5:
-    return json.dumps({"state": "error"})
-   caption = _caption(xml.decode("utf-8", "replace"), figure)
+    return _ERROR
+   caption = _caption(_s(xml), figure)
    pic = compare(jpg, a, b)[2]
    out = gl.nondet.exec_prompt(
     SECOND_LOOK.format(label_a=label_a, label_b=label_b, figure_label=_label(caption),
@@ -725,7 +743,7 @@ class FigureCheck(_Contract):
    return json.dumps({"state": "ok", "answer": got if got in SECOND else "UNCLEAR", "caption": hashlib.sha256(caption.encode()).hexdigest()})
   look = json.loads(gl.vm.run_nondet(run, _validator(run, ("UNCLEAR",))))
   if look["state"] != "ok":
-   raise gl.vm.UserError("PubMed Central could not be read right now; try again")
+   raise _Err("PubMed Central could not be read right now; try again")
   self._take(sender, int(d.stake))
   f = self.funds[d.fund_id]
   stake = int(d.stake)
@@ -759,28 +777,28 @@ class FigureCheck(_Contract):
  def confirm_by_notice(self, finding_id: str) -> str:
   d = self._finding(finding_id)
   if d.state not in (MATCH, UNCLEAR):
-   raise gl.vm.UserError(f"{d.id} is {d.state}; only open matches and unclear findings can be confirmed by a notice")
+   raise _Err(f"{d.id} is {d.state}, not open or unclear")
   pmcid, version, figure = d.pmcid, d.version, d.figure
   label_a, label_b = d.label_a, d.label_b
   def run() -> str:
    state, body = _get(f"{_EPMC}?query=PMCID:{pmcid}&format=json&resultType=core")
    if state != "ok":
-    return json.dumps({"state": "error"})
+    return _ERROR
    try:
-    rows = json.loads(body.decode("utf-8", "replace")).get("resultList", {}).get("result", [])
+    rows = json.loads(_s(body)).get("resultList", {}).get("result", [])
    except ValueError:
-    return json.dumps({"state": "error"})
+    return _ERROR
    links = (rows[0].get("commentCorrectionList") or {}).get("commentCorrection") or [] if rows else []
    ids = [str(c.get("id")) for c in links if re.match(r"^(Erratum|Correction|Retraction|Expression of concern) in$", str(c.get("type") or ""), re.I)
     and str(c.get("source")) == "MED" and re.match(r"^\d{1,9}$", str(c.get("id") or ""))][:2]
    state, xml = _get(f"{_BUCKET}/{version}/{version}.xml")
-   caption = _caption(xml.decode("utf-8", "replace"), figure) if state == "ok" else ""
+   caption = _caption(_s(xml), figure) if state == "ok" else ""
    fig_label = _label(caption)
    for pmid in ids:
     state, body = _get(f"{_EPMC}?query=EXT_ID:{pmid}%20AND%20SRC:MED&format=json&resultType=lite")
     if state != "ok":
-     return json.dumps({"state": "error"})
-    hits = json.loads(body.decode("utf-8", "replace")).get("resultList", {}).get("result", [])
+     return _ERROR
+    hits = json.loads(_s(body)).get("resultList", {}).get("result", [])
     if not hits or not hits[0].get("pmcid"):
      continue
     npmc, published = str(hits[0]["pmcid"]), str(hits[0].get("firstPublicationDate") or "")[:10]
@@ -791,15 +809,15 @@ class FigureCheck(_Contract):
     if state != "ok":
      continue
     out = gl.nondet.exec_prompt(NOTICE_LOOK.format(figure_label=fig_label, label_a=label_a, label_b=label_b,
-               notice=text.decode("utf-8", "replace")[:6000]), response_format="json")
+               notice=_s(text)[:6000]), response_format="json")
     if isinstance(out, dict) and out.get("answer") == "YES":
      return json.dumps({"state": "ok", "answer": "YES", "notice": npmc, "published": published})
    return json.dumps({"state": "none", "answer": "NONE", "checked": len(ids)})
   look = json.loads(gl.vm.run_nondet(run, _validator(run, ("NONE",))))
   if look["state"] == "error":
-   raise gl.vm.UserError("Europe PMC or PubMed Central could not be read right now; try again")
+   raise _Err("could not read Europe PMC or PubMed Central; try again")
   if look["state"] == "none":
-   raise gl.vm.UserError(f"No notice about {d.pmcid} acknowledges an image problem in this figure ({look.get('checked', 0)} read)")
+   raise _Err(f"No notice about {d.pmcid} acknowledges an image problem in this figure ({look.get('checked', 0)} read)")
   f = self.funds[d.fund_id]
   d.notice = f"{look['notice']} ({look['published']})"
   d.settled_at = self._now()
@@ -825,11 +843,11 @@ class FigureCheck(_Contract):
  def close(self, fund_id: str) -> str:
   f = self._fund(fund_id)
   if f.state != FUND_OPEN:
-   raise gl.vm.UserError("This fund is already closed")
+   raise _Err("This fund is already closed")
   if self._now()[:10] <= f.ends:
-   raise gl.vm.UserError(f"Findings are taken until {f.ends}")
+   raise _Err(f"Findings are taken until {f.ends}")
   if int(f.reserved) > 0:
-   raise gl.vm.UserError("Settle or resolve the open matches first")
+   raise _Err("Settle or resolve the open matches first")
   f.returnable, f.pot, f.state = u256(int(f.pot)), u256(0), FUND_CLOSED
   self._log(f, "closed", returnable=str(int(f.returnable)))
   return str(int(f.returnable))
@@ -837,20 +855,20 @@ class FigureCheck(_Contract):
  def refund(self, fund_id: str, funder: str) -> str:
   f = self._fund(fund_id)
   if f.state != FUND_CLOSED:
-   raise gl.vm.UserError("Close the fund first")
+   raise _Err("Close the fund first")
   funder = self._text(funder)
   if not re.match(r"^0x[0-9a-fA-F]{40}$", funder):
-   raise gl.vm.UserError("funder must be a 0x address")
+   raise _Err("funder must be a 0x address")
   key = f"{f.id}|{funder.lower()}"
   amount = int(self.funds_in.get(key, u256(0)))
   if amount == 0:
-   raise gl.vm.UserError(f"{funder} did not fund {f.id}")
+   raise _Err(f"{funder} did not fund {f.id}")
   if self.refunded.get(key, False):
-   raise gl.vm.UserError(f"{funder}'s share of {f.id} has already been credited")
+   raise _Err(f"{funder}'s share of {f.id} has already been credited")
   returnable, returned = int(f.returnable), int(f.returned_total)
   share = returnable - returned if int(f.n_refunded) + 1 == int(f.n_funders) else returnable * amount // int(f.funded_total)
   self.refunded[key] = True
-  f.n_refunded = u256(int(f.n_refunded) + 1)
+  f.n_refunded = _plus(f.n_refunded, 1)
   f.returned_total = u256(returned + share)
   self._credit(Address(funder), share)
   self._log(f, "refunded", funder=Address(funder).as_hex, amount=str(share))
@@ -861,10 +879,10 @@ class FigureCheck(_Contract):
   key = sender.as_hex.lower()
   amount = int(self.owed.get(key, u256(0)))
   if amount == 0:
-   raise gl.vm.UserError("Nothing to withdraw")
+   raise _Err("Nothing to withdraw")
   self.owed[key] = u256(0)
-  self.owed_total = u256(int(self.owed_total) - amount)
-  self.withdrawn_total = u256(int(self.withdrawn_total) + amount)
+  self.owed_total = _plus(self.owed_total, -amount)
+  self.withdrawn_total = _plus(self.withdrawn_total, amount)
   _send(sender, amount)
   return str(amount)
  @gl.public.view

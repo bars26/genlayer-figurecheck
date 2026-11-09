@@ -179,9 +179,9 @@ def test_validators_settle_a_wavering_model_on_the_cautious_answer(direct_vm, di
     (("ab", None, REWARD, STAKE, 60, 5), 2 * GEN, "title must be 3 to 80 characters"),
     (("Fund", "2026-02-31", REWARD, STAKE, 60, 5), 2 * GEN, "ends must be a real date"),
     (("Fund", "2020-01-01", REWARD, STAKE, 60, 5), 2 * GEN, "ends must be from today"),
-    (("Fund", None, REWARD, GEN // 1000, 60, 5), 2 * GEN, "reward and stake at least 0.01 GEN"),
-    (("Fund", None, REWARD, STAKE, 5, 5), 2 * GEN, "contest_minutes 10 to 43200"),
-    (("Fund", None, REWARD, STAKE, 60, 0), 2 * GEN, "per_reporter 1 to 100"),
+    (("Fund", None, REWARD, GEN // 1000, 60, 5), 2 * GEN, "reward, stake >= 0.01 GEN"),
+    (("Fund", None, REWARD, STAKE, 5, 5), 2 * GEN, "contest_minutes 10-43200"),
+    (("Fund", None, REWARD, STAKE, 60, 0), 2 * GEN, "per_reporter 1-100"),
     (("Fund", None, REWARD, STAKE, 60, 5), GEN // 4, "fund it with at least one reward"),
 ])
 def test_invalid_funds_are_refused_and_their_gen_credited_back(direct_vm, direct_deploy, direct_alice, monkeypatch, args, value, reason):
@@ -270,11 +270,41 @@ def test_a_panel_at_the_edge_of_the_figure_is_compared_within_the_figure(direct_
 def test_the_same_panels_once_per_fund_and_a_cap_per_reporter(direct_vm, direct_deploy, direct_alice, direct_bob):
     contract, fid = _fund(direct_vm, direct_deploy, direct_alice, cap=2)
     _file(direct_vm, contract, direct_bob)
-    with direct_vm.expect_revert("finding_0 already reports these panels"):
-        _file(direct_vm, contract, direct_bob, a=GCN2_HT29, b=GCN2_RKO)
+    # Swapped, shifted by a few pixels, or a smaller box inside the same panels: still the same pair.
+    for a, b in [(GCN2_HT29, GCN2_RKO), ("197,114,350,180", "374,114,527,180"), ("200,120,300,170", "377,120,477,170")]:
+        with direct_vm.expect_revert("finding_0 already reports these panels"):
+            _file(direct_vm, contract, direct_bob, a=a, b=b)
     _file(direct_vm, contract, direct_bob, a=S51_RKO, b=S51_HT29, answer="UNCLEAR")
     with direct_vm.expect_revert("at most 2 findings per reporter"):
         _file(direct_vm, contract, direct_bob, a=WELL_WT_GLN, b=WELL_KI_GLN, figure=FIG5)
+
+
+def test_panels_judged_different_can_be_filed_again(direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie):
+    contract, fid = _fund(direct_vm, direct_deploy, direct_alice)
+    _file(direct_vm, contract, direct_bob, answer="DISTINCT")
+    assert contract.get_finding("finding_0").state == "no_match"
+    assert _file(direct_vm, contract, direct_charlie, a="197,114,350,180", b="374,114,527,180") == "finding_1"
+    with direct_vm.expect_revert("finding_1 already reports these panels"):
+        _file(direct_vm, contract, direct_bob)
+
+
+def test_a_figure_takes_a_bounded_number_of_findings(direct_vm, direct_deploy, direct_alice, direct_bob):
+    contract, fid = _fund(direct_vm, direct_deploy, direct_alice)
+    contract.on_figure[f"{fid}|{PMC}|{FIG7}"] = " ".join(f"finding_x{i}" for i in range(24))
+    with direct_vm.expect_revert("at most 24 findings per figure in this fund"):
+        _file(direct_vm, contract, direct_bob)
+    assert _file(direct_vm, contract, direct_bob, a=WELL_WT_GLN, b=WELL_KI_GLN, figure=FIG5) == "finding_0"
+
+
+def test_same_pair_matches_overlapping_boxes_in_either_order(direct_vm, direct_deploy, direct_alice):
+    contract, _ = _fund(direct_vm, direct_deploy, direct_alice)
+    same_pair = _module(contract).same_pair
+    a, b = [0, 0, 40, 20], [100, 0, 140, 20]
+    assert same_pair(a, b, a, b) and same_pair(a, b, b, a)
+    assert same_pair(a, b, [10, 0, 50, 20], [100, 5, 140, 25])  # shifted by a quarter
+    assert not same_pair(a, b, [25, 0, 65, 20], [100, 0, 140, 20])  # A moved past half of its width
+    assert not same_pair(a, b, a, [200, 0, 240, 20])  # A with a third panel is another finding
+    assert same_pair([0, 0, 200, 100], b, [10, 10, 30, 30], [100, 0, 140, 20])  # a small box inside a big one
 
 
 # --- settling, contests and notices -------------------------------------------------------------------------------

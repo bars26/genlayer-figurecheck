@@ -44,7 +44,7 @@ contract anyone can check and re-check:
 wallet: the app shows both crops and a preview of the shape score. Writes need MetaMask on GenLayer Studio (chain 61999);
 **Test GEN** funds your wallet.
 
-**Contract:** [`0xB0595462362313C08f7b41dC66BE135eEe8Ce018`](https://explorer-studio.genlayer.com/address/0xB0595462362313C08f7b41dC66BE135eEe8Ce018) on GenLayer Studio.
+**Contract:** [`0x73473596083720B46f27846d214Cec9c00b05e76`](https://explorer-studio.genlayer.com/address/0x73473596083720B46f27846d214Cec9c00b05e76) on GenLayer Studio.
 
 ## Why GenLayer
 
@@ -111,7 +111,7 @@ wallet 0.6 GEN (0.5 reward + stake). The four transactions are in [`docs/REPRODU
 | The figure is read from PubMed Central's open-access bucket and must match the md5 PubMed Central publishes | Nobody can submit a doctored copy of a figure |
 | Articles already retracted are refused; only the open-access set is accepted | Findings are about what readers can see and reuse |
 | A shape score below 0.5 forfeits the stake without asking the model; a match needs DUPLICATED and at least 0.6 | Spam costs the reporter; the model cannot make a match on its own |
-| One finding per pair of panels per fund, a cap per reporter, and the fund's stake taken from the reporter's deposit | Nobody farms rewards by re-filing or splitting |
+| One finding per pair of panels per fund: boxes that overlap an earlier finding's by at least half of the smaller box, in either order, are the same pair (unless it was judged no match or overturned); at most 24 findings per figure, a cap per reporter, and the fund's stake taken from the reporter's deposit | Nobody farms a second reward by shifting or resizing a box, and the overlap check stays bounded |
 | Stakes are taken from deposited GEN only after the validators agree on a reading | A reading that ends undecided (GenLayer keeps GEN sent with a call that fails consensus) never strands a stake |
 | A validator agrees with a match only on its own DUPLICATED; with an UNCLEAR leader it agrees whatever the model says, as long as the code matches | A wavering model ends in the cautious outcome (stake back, no reward), never in a payout |
 | A reward is held from the pot when a match is filed, so a match is always payable | Funders cannot drain the pot under an open finding |
