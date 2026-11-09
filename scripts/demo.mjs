@@ -73,12 +73,15 @@ async function write(c, who, functionName, args, value = 0n, { expectError = fal
   }
 }
 
+// Studio sometimes answers a read right after an accepted write from state that does not have it yet: retry those too.
+const LAGGING = /execution failed|No (finding|fund) with id/i;
 const read = async (c, functionName, args = []) => {
   for (let attempt = 1; ; attempt++) {
     try {
       return await c.readContract({ address: CONTRACT, functionName, args });
     } catch (err) {
-      if (TRANSIENT.test(String(err?.message)) && attempt < 6) { await sleep(15000 * attempt); continue; }
+      const msg = String(err?.message) + JSON.stringify(err?.cause ?? "");
+      if ((TRANSIENT.test(msg) || LAGGING.test(msg)) && attempt < 8) { await sleep(5000 * attempt); continue; }
       throw err;
     }
   }
