@@ -1,0 +1,10 @@
+{
+  "name": "FigureCheck",
+  "short_name": "FigureCheck",
+  "description": "The same image, twice? Image-integrity findings on open-access figures, judged by GenLayer validators",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F7F4EC",
+  "theme_color": "#F7F4EC",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
